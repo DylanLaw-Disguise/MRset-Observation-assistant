@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MR Observation Manager</title>
+
+<style>
+:root{
+--bg:#0f172a;
+--card-bg:#1e293b;
+--accent:#3b82f6;
+--success:#10b981;
+--danger:#ef4444;
+--text:#f8fafc;
+--text-dim:#94a3b8;
+--border:#334155;
+}
+
+body{
+margin:0;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica;
+background:var(--bg);
+color:var(--text);
+-webkit-tap-highlight-color:transparent;
+}
+
+.header{
+padding:20px;
+font-size:20px;
+font-weight:700;
+background:var(--card-bg);
+border-bottom:1px solid var(--border);
+display:flex;
+align-items:center;
+gap:10px;
+}
+
+.connectBar{
+padding:15px;
+background:#111827;
+display:grid;
+grid-template-columns:1fr 1fr auto;
+gap:10px;
+align-items:center;
+border-bottom:1px solid var(--border);
+}
+
+.input-group{
+display:flex;
+flex-direction:column;
+font-size:11px;
+color:var(--text-dim);
+text-transform:uppercase;
+font-weight:bold;
+}
+
+input{
+background:#0f172a;
+border:1px solid var(--border);
+border-radius:8px;
+padding:10px;
+color:white;
+font-size:16px;
+margin-top:4px;
+}
+
+.main-content{
+display:flex;
+padding:15px;
+gap:20px;
+max-width:1100px;
+margin:0 auto;
+}
+
+.left-panel{
+width:350px;
+}
+
+.right-panel{
+flex:1;
+}
+
+h3{
+margin:0 0 15px 0;
+font-size:18px;
+color:var(--text-dim);
+}
+
+.camera-card{
+background:var(--card-bg);
+padding:16px;
+border-radius:14px;
+margin-bottom:12px;
+border:2px solid transparent;
+cursor:pointer;
+}
+
+.camera-card.active{
+border-color:var(--accent);
+box-shadow:0 0 12px rgba(59,130,246,.4);
+}
+
+.obs-card{
+background:var(--card-bg);
+border-radius:14px;
+padding:16px;
+margin-bottom:12px;
+display:flex;
+align-items:center;
+justify-content:space-between;
+}
+
+.switch{
+position:relative;
+display:inline-block;
+width:54px;
+height:30px;
+margin-right:12px;
+}
+
+.switch input{
+opacity:0;
+width:0;
+height:0;
+}
+
+.slider{
+position:absolute;
+top:0;left:0;right:0;bottom:0;
+background:#475569;
+border-radius:34px;
+cursor:pointer;
+}
+
+.slider:before{
+content:"";
+position:absolute;
+height:22px;width:22px;
+left:4px;bottom:4px;
+background:white;
+border-radius:50%;
+transition:.3s;
+}
+
+input:checked + .slider{
+background:var(--success);
+}
+
+input:checked + .slider:before{
+transform:translateX(24px);
+}
+
+.btn{
+border:none;
+border-radius:12px;
+padding:14px;
+cursor:pointer;
+color:white;
+font-weight:600;
+}
+
+.btn-primary{background:var(--accent); width:100%;}
+.btn-capture{background:var(--success); width:100%; margin-bottom:20px;}
+.btn-delete-all{background:transparent; border:1px solid var(--danger); color:var(--danger); width:100%;}
+
+.trash-btn{
+background:#334155;
+color:var(--danger);
+width:44px;height:44px;
+display:flex;
+align-items:center;
+justify-content:center;
+border-radius:10px;
+cursor:pointer;
+}
+
+.rms-badge{
+font-family:monospace;
+background:#0f172a;
+padding:4px 8px;
+border-radius:6px;
+font-size:13px;
+color:var(--text-dim);
+}
+
+.status-tag{
+text-align:center;
+font-size:12px;
+padding:5px;
+color:var(--text-dim);
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">MR Observation Manager</div>
+
+<div class="connectBar">
+
+<div class="input-group">
+IP
+<input id="ipInput" placeholder="192.168.x.x">
+</div>
+
+<div class="input-group">
+Port
+<input id="portInput" value="80">
+</div>
+
+<button class="btn btn-primary" onclick="connect()">Connect</button>
+
+</div>
+
+<div id="status" class="status-tag">Not Connected</div>
+
+<div class="main-content">
+
+<div class="left-panel">
+<h3>Cameras</h3>
+<div id="cameraList"></div>
+</div>
+
+<div class="right-panel">
+
+<h3>Observations</h3>
+
+<button class="btn btn-capture" onclick="captureObservation()">📸 Capture New</button>
+
+<div id="spatialName" style="margin-bottom:10px;font-size:13px;color:var(--accent);"></div>
+
+<div id="observationList"></div>
+
+<button class="btn btn-delete-all" onclick="deleteAllObservations()">Clear All Observations</button>
+
+</div>
+
+</div>
+
+<script>
+
+let API=""
+let cameras=[]
+let spatialCalibrations=[]
+let currentCamera=null
+let currentSpatial=null
+
+function setStatus(msg, ok=false){
+const el=document.getElementById("status")
+el.innerText=msg
+el.style.color=ok?"#10b981":"#ef4444"
+}
+
+async function connect(){
+
+const ip=document.getElementById("ipInput").value
+const port=document.getElementById("portInput").value
+
+API=`http://${ip}:${port}/api/session/mixedreality`
+
+setStatus("Connecting...")
+
+try{
+await fetchCameras()
+await fetchObservations()
+setStatus("Connected to "+ip,true)
+}catch(e){
+setStatus("ERROR: "+e.message)
+console.error(e)
+}
+
+}
+
+async function GET(path){
+const r=await fetch(API+path)
+if(!r.ok) throw new Error(await r.text())
+return r.json()
+}
+
+async function POST(path,data){
+const r=await fetch(API+path,{
+method:"POST",
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify(data)
+})
+if(!r.ok) throw new Error(await r.text())
+return r.json().catch(()=>null)
+}
+
+async function fetchCameras(){
+const data=await GET("/cameras")
+cameras=data.result
+renderCameras()
+}
+
+async function fetchObservations(){
+const data=await GET("/spatialcalibrations")
+spatialCalibrations=data.result
+renderObservations()
+}
+
+function renderCameras(){
+
+const list=document.getElementById("cameraList")
+list.innerHTML=""
+
+cameras.forEach(cam=>{
+
+const div=document.createElement("div")
+div.className="camera-card"
+
+if(currentCamera && currentCamera.uid===cam.uid){
+div.classList.add("active")
+}
+
+div.innerHTML=`
+<div style="font-weight:bold;font-size:17px">${cam.name}</div>
+<div style="font-size:12px;color:var(--text-dim);margin-top:4px">
+${cam.spatialCalibration.name}
+</div>
+`
+
+div.onclick=()=>selectCamera(cam,div)
+
+list.appendChild(div)
+
+})
+
+}
+
+async function selectCamera(cam,element){
+
+document.querySelectorAll(".camera-card").forEach(c=>c.classList.remove("active"))
+
+element.classList.add("active")
+
+currentCamera=cam
+currentSpatial=cam.spatialCalibration
+
+document.getElementById("spatialName").innerText="Target: "+currentSpatial.name
+
+await POST("/selectcamera",{
+mrSet:{
+uid:cam.spatialCalibration.uid,
+name:cam.spatialCalibration.name
+},
+cameraOverride:{
+uid:cam.uid,
+name:cam.name
+}
+})
+
+renderObservations()
+
+}
+
+function renderObservations(){
+
+const container=document.getElementById("observationList")
+container.innerHTML=""
+
+if(!currentSpatial) return
+
+const spatial=spatialCalibrations.find(s=>s.uid===currentSpatial.uid)
+if(!spatial) return
+
+spatial.observations.forEach(obs=>{
+
+const card=document.createElement("div")
+card.className="obs-card"
+
+card.innerHTML=`
+<div style="display:flex;align-items:center">
+<label class="switch">
+<input type="checkbox"
+${obs.isEnabled?"checked":""}
+onchange="toggleObservation('${obs.uid}',this.checked)">
+<span class="slider"></span>
+</label>
+
+<div>
+<div style="font-weight:600">${obs.name || "Observation"}</div>
+<div class="rms-badge">RMS: ${obs.rmsError?.toFixed(3) ?? "N/A"}</div>
+</div>
+</div>
+
+<div class="trash-btn" onclick="deleteObservation('${obs.uid}')">🗑</div>
+`
+
+container.appendChild(card)
+
+})
+
+}
+
+async function toggleObservation(uid,enabled){
+await POST("/enableobservations",{
+observations:[{uid:uid,enable:enabled}]
+})
+fetchObservations()
+}
+
+async function deleteObservation(uid){
+if(!confirm("Delete this observation?")) return
+await POST("/deleteobservations",{observations:[uid]})
+fetchObservations()
+}
+
+async function captureObservation(){
+
+if(!currentCamera){
+alert("Select a camera first")
+return
+}
+
+await POST("/captureobservation",{
+camera:{
+uid:currentCamera.uid,
+name:currentCamera.name
+},
+spatialCalibration:{
+uid:currentSpatial.uid,
+name:currentSpatial.name
+}
+})
+
+fetchObservations()
+
+}
+
+async function deleteAllObservations(){
+
+if(!currentSpatial) return
+if(!confirm("Delete all observations?")) return
+
+await POST("/deleteallobservations",{
+spatialCalibration:{
+uid:currentSpatial.uid,
+name:currentSpatial.name
+}
+})
+
+fetchObservations()
+
+}
+
+</script>
+
+</body>
+</html>
